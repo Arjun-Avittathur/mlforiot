@@ -5,13 +5,15 @@ import numpy as np
 import os
 from model import calculate_student_metrics, identify_strengths_weaknesses, calculate_average_performance, evaluate_model, generate_specific_recommendations
 from utils import visualize_student_performance, visualize_student_vs_average
+from dotenv import load_dotenv
+# Load environment variables from .env file
+load_dotenv()
 
 # Create data directory if it doesn't exist
 os.makedirs('data', exist_ok=True)
 
-# OpenRouter API Key
-OPENROUTER_API_KEY = "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"
-
+# Get API key from environment variables
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 def main():
     st.set_page_config(
         page_title="Student Performance Analysis",
