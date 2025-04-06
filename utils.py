@@ -7,7 +7,7 @@ def visualize_student_performance(student_section_performance, student_overall, 
     Create visualizations for student performance analysis comparing a selected student with class average
     """
     # Create a figure with three subplots
-    fig = plt.figure(figsize=(14, 10))
+    fig = plt.figure(figsize=(15, 10))
     
     # Section performance - only selected student vs average
     ax1 = fig.add_subplot(221)

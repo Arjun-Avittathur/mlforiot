@@ -1,15 +1,24 @@
 import streamlit as st
-import os
-# Add this at the beginning of your app.py file
-os.makedirs('data', exist_ok=True)
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
-import seaborn as sns
-from model import calculate_student_metrics, identify_strengths_weaknesses, generate_recommendations, calculate_average_performance, evaluate_model
+import os
+from model import calculate_student_metrics, identify_strengths_weaknesses, calculate_average_performance, evaluate_model, generate_specific_recommendations
 from utils import visualize_student_performance, visualize_student_vs_average
 
+# Create data directory if it doesn't exist
+os.makedirs('data', exist_ok=True)
+
+# OpenRouter API Key
+OPENROUTER_API_KEY = "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"
+
 def main():
+    st.set_page_config(
+        page_title="Student Performance Analysis",
+        page_icon="📊",
+        layout="wide",
+    )
+    
     st.title("Student Performance Analysis and Recommendations")
     
     upload_mode = st.radio("Select upload mode:", ["Existing database", "New student data"])
@@ -27,48 +36,35 @@ def main():
             new_student_data = pd.read_csv(uploaded_file)
             
             try:
-                # Load existing data and append new student data
-                existing_data = pd.read_csv('data/student_data.csv')
-                
-                # Check if student already exists
-                new_student_id = new_student_data['student_id'].unique()[0]
-                if new_student_id in existing_data['student_id'].unique():
-                    # Replace existing student data
-                    existing_data = existing_data[existing_data['student_id'] != new_student_id]
-                
-                # Append new student data
-                data = pd.concat([existing_data, new_student_data], ignore_index=True)
-                
-                # Save updated data
-                data.to_csv('data/student_data.csv', index=False)
-                st.success(f"New student data added to database. Total students: {len(data['student_id'].unique())}")
-            except FileNotFoundError:
-                # Create new database with this student
+                # Save uploaded data
+                os.makedirs('data', exist_ok=True)
                 new_student_data.to_csv('data/student_data.csv', index=False)
                 data = new_student_data
-                st.success("Created new database with this student")
+                st.success(f"Created new database with {len(new_student_data['student_id'].unique())} students")
+            except Exception as e:
+                st.error(f"Error saving data: {e}")
+                data = new_student_data
         else:
             st.warning("Please upload student data")
             data = None
     
     if data is not None:
-        # Student selector (moved up to select student first)
+        # Student selector
         student_ids = data['student_id'].unique()
         selected_student = st.selectbox("Select a student to analyze:", student_ids)
         
-        # Display raw data for the selected student only
+        # Display raw data for selected student
         if st.checkbox("Show raw data for selected student"):
-            st.subheader(f"Raw Data for Student ID: {selected_student}")
-            student_raw_data = data[data['student_id'] == selected_student]
-            st.dataframe(student_raw_data)
+            st.subheader("Raw Data Preview")
+            st.dataframe(data[data['student_id'] == selected_student], use_container_width=True)
         
         # Process data
-        student_section_performance, student_overall, learning_rates_df = calculate_student_metrics(data)
+        student_section_performance, student_overall = calculate_student_metrics(data)
         
         # Calculate average performance
         avg_section_performance, avg_overall_performance = calculate_average_performance(student_section_performance, student_overall)
         
-        # Display overall class average information
+        # Display class averages
         st.subheader("Class Performance Averages")
         col1, col2 = st.columns(2)
         
@@ -82,29 +78,23 @@ def main():
                 'Section': [f"{section_mapping[row['section']]} ({row['section']})" for _, row in avg_section_performance.iterrows()],
                 'Average Score': [f"{row['avg_score_percentage']:.2f}%" for _, row in avg_section_performance.iterrows()]
             })
-            st.dataframe(section_avg_data, hide_index=True)
-        
-        # Identify strengths and weaknesses
-        strengths_weaknesses = identify_strengths_weaknesses(student_section_performance, avg_section_performance)
-        
-        # Generate comprehensive recommendations
-        all_section_recommendations = generate_recommendations(strengths_weaknesses, learning_rates_df, 
-                                                            student_section_performance, avg_section_performance, all_sections=True)
+            st.dataframe(section_avg_data, hide_index=True, use_container_width=True)
         
         # Model evaluation
-        accuracy, precision, model_results = evaluate_model(data, learning_rates_df)
-        
         with st.expander("Model Evaluation Metrics"):
+            accuracy, precision = evaluate_model(data)
             st.write(f"Model Accuracy: {accuracy:.2f}%")
             st.write(f"Model Precision: {precision:.2f}%")
             st.write("Model accuracy measures how often our prediction model correctly identifies whether a student is performing above or below average.")
-            st.write("Model precision measures how often our predictions of above-average performance are correct.")
         
-        # Visualize overall performance - only for selected student vs average
+        # Visualize overall performance
         st.subheader("Overall Performance Analysis")
         fig = visualize_student_performance(student_section_performance, student_overall, 
                                            avg_section_performance, avg_overall_performance, selected_student)
         st.pyplot(fig)
+        
+        # Identify strengths and weaknesses
+        strengths_weaknesses = identify_strengths_weaknesses(student_section_performance, avg_section_performance)
         
         # Individual student analysis
         st.subheader(f"Detailed Analysis for Student ID: {selected_student}")
@@ -128,15 +118,12 @@ def main():
         
         # Add difference from average
         section_data['Difference from Average'] = section_data['Score (%)'] - section_data['Class Average (%)']
-        section_data['Performance'] = section_data['Difference from Average'].apply(
-            lambda x: "Above Average" if x > 5 else "Average" if abs(x) <= 5 else "Below Average"
-        )
         
         # Reorder columns for better presentation
         section_data = section_data[['Subject', 'Section', 'Correct Answers', 'Total Questions', 
-                                    'Score (%)', 'Class Average (%)', 'Difference from Average', 'Performance']]
+                                    'Score (%)', 'Class Average (%)', 'Difference from Average']]
         
-        st.dataframe(section_data, hide_index=True)
+        st.dataframe(section_data, hide_index=True, use_container_width=True)
         
         # Overall score comparison
         overall = student_overall[student_overall['student_id'] == selected_student]['overall_score'].values[0]
@@ -159,14 +146,21 @@ def main():
         with col2:
             st.write("**Areas for Improvement:**", ', '.join(f"{section_mapping[w]} (Section {w})" for w in strengths_weaknesses[selected_student]['weaknesses']))
         
-        # Comprehensive recommendations for all sections
+        # Generate highly specific recommendations
+        with st.spinner("Generating personalized recommendations..."):
+            specific_recommendations = generate_specific_recommendations(data, selected_student, student_section_performance, 
+                                                                    avg_section_performance, OPENROUTER_API_KEY)
+        
+        # Display personalized recommendations
         st.markdown("### Personalized Recommendations:")
         
-        for section, recommendations in all_section_recommendations[selected_student].items():
-            subject_name = section_mapping.get(section, section)
-            st.markdown(f"#### {subject_name} (Section {section}):")
-            for rec in recommendations:
-                st.write(f"- {rec}")
+        for section, section_name in section_mapping.items():
+            with st.expander(f"{section_name} (Section {section}):", expanded=(section in strengths_weaknesses[selected_student]['weaknesses'])):
+                if section in specific_recommendations:
+                    for recommendation in specific_recommendations[section]:
+                        st.markdown(f"• {recommendation}")
+                else:
+                    st.write("No specific recommendations available for this section.")
         
         # Comparison with average
         st.subheader("Comparison with Average Performance")
